@@ -1,0 +1,10 @@
+node_modules
+trash
+package.json
+package-lock.json
+unused
+tests
+pm2-master
+doneoldbackup
+callbackinfo.txt
+ninja-master-v1.0
