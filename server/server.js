@@ -5,7 +5,7 @@ const http = require('http')
 const bodyParser = require('body-parser')
 
 //modularization related requires
-const filepath = require('filepath')
+const path = require('path')
 const listener = require('./listener.js')
 
 //server related requires and setup

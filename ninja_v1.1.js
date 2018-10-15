@@ -31,9 +31,11 @@ app.post('/',function(req, res){
     })
     var getIpNum = (data) => {
        return new Promise((resolve, reject) => {
+         https://esquaredcommunications.infopluswms.com/infoplus-wms/api/v2.0/order/search?filter=customerOrderNo%20like%20'%25598862%25'
+
         var options = {
           "hostname": "esquaredcommunications.infopluswms.com",
-          "path": "/infoplus-wms/api/v2.0/order/search?filter=customerOrderNo%20eq%20CW" + data.cwNum,
+          "path": "/infoplus-wms/api/v2.0/order/search?filter=customerOrderNo%20like%20'%25" + data.cwNum + "%25'",
           "method": "GET",
           "headers": {
             "Accept": "application/json",
@@ -71,10 +73,12 @@ app.post('/',function(req, res){
       })
     }
     var getShipInfos = (data) => {
-       return new Promise((resolve, reject) => {
+      data.shipInfos = []
+      return new Promise((resolve, reject) => {
+        data.orderNums.forEach(function (order) {
          var options = {
            "hostname": "esquaredcommunications.infopluswms.com",
-           "path": "/infoplus-wms/api/v2.0/parcelShipment/search?filter=orderNo%20eq%20" + data.orderNums[0],
+           "path": "/infoplus-wms/api/v2.0/parcelShipment/search?filter=orderNo%20eq%20" + order,
            "method": "GET",
            "headers": {
              "Accept": "application/json",
@@ -92,12 +96,15 @@ app.post('/',function(req, res){
            res.on("end", function () {
              body = Buffer.concat(chunks)
              var ship = JSON.parse(body.toString())
-             data.shipInfos = []
+
              for (i=0; i<ship.length; i++) {
                data.shipInfos.push(ship[i])
              }
+
+             if (data.shipInfos === undefined || data.shipInfos.length === 0) {
+               reject("No Ship Info")
+             }
              resolve(data)
-             reject("No Paired InfoPlus Order")
            })
          })
          req.write(JSON.stringify({ id: 0,
@@ -110,7 +117,9 @@ app.post('/',function(req, res){
           inactiveFlag: 'false' }))
           req.end()
         })
+      })
     }
+
     var getProductIds = (data) => {
        return new Promise((resolve, reject) => {
          var options = {
@@ -139,12 +148,18 @@ app.post('/',function(req, res){
                data.productIds.push(productIds[i].id)
                productDescrips.push(productIds[i].description)
             }
-            let exist = productDescrips.indexOf("Shipping Cost") > -1
-            if (exist) {
-              //#todo error handling
-              reject("ticket already has shipping")
+
+            function exists(elem) {
+              return elem.includes("Shipping")
             }
-            resolve(data)
+            var doneShipInfos = productDescrips.filter(exists)
+            if (data.shipInfos === undefined || data.shipInfos.length === 0) {
+              reject("get product call failed")
+            } else if (data.shipInfos.length === doneShipInfos.length) {
+              reject("stopping, ship costs already done on this ticket")
+            } else {
+              resolve(data)
+            }
             })
          })
          req.write(JSON.stringify({ id: 0,
@@ -214,79 +229,81 @@ app.post('/',function(req, res){
       });
 
       p.then((num) => {
-        let seqNum = Math.max(...num)+1
-        //actual post code inside then function #problem?
-        var options = {
-           "hostname": "connect.e2cc.com",
-           "path": "/v4_6_release/apis/3.0/procurement/products",
-           "method": "POST",
-           "headers": {
-             "Accept": "application/json",
-             "x-cw-usertype": "integrator",
-             "Authorization": "Basic RVNRVUFSRUQrdXJURzFVN0RjNWVCYnVoNTpCaEEzdU1PY05sR0pwUGlH",
-             "Cache-Control": "no-cache",
-             "Content-Type": "application/json"
+        let seqNum = Math.max(...num) + 1
+        for (i=0; i<data.shipInfos.length; i++) {
+
+          var options = {
+             "hostname": "connect.e2cc.com",
+             "path": "/v4_6_release/apis/3.0/procurement/products",
+             "method": "POST",
+             "headers": {
+               "Accept": "application/json",
+               "x-cw-usertype": "integrator",
+               "Authorization": "Basic RVNRVUFSRUQrdXJURzFVN0RjNWVCYnVoNTpCaEEzdU1PY05sR0pwUGlH",
+               "Cache-Control": "no-cache",
+               "Content-Type": "application/json"
+             }
            }
-         }
-         var req = https.request(options, function (res) {
-           var chunks = []
+           var req = https.request(options, function (res) {
+             var chunks = []
 
-           res.on("data", function (chunk) {
-             chunks.push(chunk)
-           })
+             res.on("data", function (chunk) {
+               chunks.push(chunk)
+             })
 
-           res.on("end", function () {
-             body = Buffer.concat(chunks)
-             var result = JSON.parse(body.toString())
+             res.on("end", function () {
+               body = Buffer.concat(chunks)
+               var result = JSON.parse(body.toString())
+             })
            })
-         })
-         req.write(JSON.stringify(
-           {
-           catalogItem: {
-                "id": 760,
-                "identifier": "Shipping",
-                "_info": {
-                    "catalog_href": "https://connect.e2cc.com/v4_6_release/apis/3.0/procurement/catalog/760`"
-                }
-              },
-            ticket: {
-                  "id": data.cwNum,
-                  "summary": "Shipping",
+           req.write(JSON.stringify(
+             {
+             catalogItem: {
+                  "id": 760,
+                  "identifier": "Shipping",
                   "_info": {
-                      "ticket_href": "https://connect.e2cc.com/v4_6_release/apis/3.0/service/tickets/" + data.cwNum,
+                      "catalog_href": "https://connect.e2cc.com/v4_6_release/apis/3.0/procurement/catalog/760`"
                   }
                 },
-           description: 'Shipping Cost',
-           sequenceNumber: seqNum,
-           quantity: 1,
-           price: (data.shipInfos[0].chargedFreightAmount + 1) + ((data.shipInfos[0].chargedFreightAmount + 1)/4),
-           cost: 0,
-           discount: 0,
-           billableOption: 'Billable',
-           locationId: 2,
-           businessUnitId: 15,
-           taxableFlag: false,
-           dropshipFlag: false,
-           specialOrderFlag: false,
-           phaseProductFlag: false,
-           cancelledFlag: false,
-           quantityCancelled: 0,
-           customerDescription: "Carrier :" + data.shipInfos[0].parcelAccountNo + " " + "Tracking Number: " + data.shipInfos[0].trackingNo + " " + "Site: " + data.siteName,
-           productSuppliedFlag: false,
-           subContractorAmountLimit: 0,
-           warehouse: 'eSquared Office Ste J-17',
-           warehouseBin: 'Tempe Office Ste J-17',
-           listPrice: 0,
-           company:
-            { id: 2,
-              identifier: 'eSquared',
-              name: 'eSquared Communications Consulting',
-              _info: { company_href: 'https://connect.e2cc.com/v4_6_release/apis/3.0/company/companies/2' } },
-           productClass: 'Agreement',
-           needToPurchaseFlag: false,
-           _info: { lastUpdated: '2018-08-25T19:41:04Z', updatedBy: 'mshostak' } }))
-         req.end()
-      });
+              ticket: {
+                    "id": data.cwNum,
+                    "summary": "Shipping",
+                    "_info": {
+                        "ticket_href": "https://connect.e2cc.com/v4_6_release/apis/3.0/service/tickets/" + data.cwNum,
+                    }
+                  },
+             description: 'Shipping Cost for IP order ' + data.orderNums[i],
+             sequenceNumber: seqNum + i,
+             quantity: 1,
+             price: (data.shipInfos[i].chargedFreightAmount + 1) + ((data.shipInfos[i].chargedFreightAmount + 1)/4),
+             cost: 0,
+             discount: 0,
+             billableOption: 'Billable',
+             locationId: 2,
+             businessUnitId: 15,
+             taxableFlag: false,
+             dropshipFlag: false,
+             specialOrderFlag: false,
+             phaseProductFlag: false,
+             cancelledFlag: false,
+             quantityCancelled: 0,
+             customerDescription: "Carrier :" + data.shipInfos[i].parcelAccountNo + " " + "Tracking Number: " + data.shipInfos[i].trackingNo + " " + "Site: " + data.siteName,
+             productSuppliedFlag: false,
+             subContractorAmountLimit: 0,
+             warehouse: 'eSquared Office Ste J-17',
+             warehouseBin: 'Tempe Office Ste J-17',
+             listPrice: 0,
+             company:
+              { id: 2,
+                identifier: 'eSquared',
+                name: 'eSquared Communications Consulting',
+                _info: { company_href: 'https://connect.e2cc.com/v4_6_release/apis/3.0/company/companies/2' } },
+             productClass: 'Agreement',
+             needToPurchaseFlag: false,
+             _info: { lastUpdated: '2018-08-25T19:41:04Z', updatedBy: 'mshostak' } }))
+           req.end()
+         }
+      })
 
 
      }
@@ -295,11 +312,11 @@ app.post('/',function(req, res){
      data = await getShipInfos(data)
      data = await getProductIds(data)
      post(data)
-     console.log(data.cwNum)
+     console.log(data.cwNum);
    }()
    ninja.then((data) => {
-     console.log('logged')
+     console.log('completed')
    }).catch((e) => {
-     console.log('errored')
+     console.log(e)
    })
  })
